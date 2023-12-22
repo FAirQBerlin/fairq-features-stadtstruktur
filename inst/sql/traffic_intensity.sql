@@ -1,0 +1,12 @@
+select
+  id, 
+  x, 
+  y, 
+  strassenklasse_0, 
+  strassenklasse_I, 
+  strassenklasse_II, 
+  strassenklasse_III, 
+  strassenklasse_IV, 
+  strassenklasse_V
+from 
+  streets;

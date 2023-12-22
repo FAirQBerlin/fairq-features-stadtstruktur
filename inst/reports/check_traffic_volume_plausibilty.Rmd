@@ -1,0 +1,107 @@
+---
+title: "Check traffic volume plausibility"
+output: 
+  html_document:
+    toc: true
+    number_sections: false
+    toc_float: true
+    toc_depth: 3
+    self_contained: true
+author: "Guido Schulz (guido.schulz@inwt-statistics.de)"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+---
+
+```{r setup, message=FALSE, warning=FALSE, cache=FALSE, echo=FALSE}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# Traffic detectors, für die traffic volume viel höher ist als unsere model pred
+#
+# siehe https://github.com/INWT/fairq-model-traffic-detectors/issues/47
+#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+devtools::load_all()
+
+library(sf)
+library(tidyverse)
+library(mapview)
+
+fig_width <- 12
+fig_height <- 12
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = fig_width,
+  fig.height = fig_height)
+```
+
+
+```{r loadRData}
+# 1. Load data
+load("../../data/strange_detectors.RData")
+detectors <- strangeDets
+```
+
+
+```{r}
+# 2.a. Extract cell centroids
+cell_centroids_df <- data.frame(x = as.integer(detectors$stadt_x),
+                                y = as.integer(detectors$stadt_y))
+cell_centroids <- st_as_sf(cell_centroids_df,
+                           coords = c("x", "y"),
+                           crs = st_crs(25833))
+
+# 2.b. Extract detectors
+detectors <- detectors %>%
+  select(-stadt_x, -stadt_y) %>%
+  rename(x = "det_x",
+         y = "det_y") %>% 
+  st_as_sf(
+    coords = c("x", "y"),
+    crs = st_crs(25833))
+
+# 2.c. Get additional data on detectors
+detectors_info <- send_query_clickhouse_in("select * from traffic_det_cross_sections;") %>% 
+  filter(mq_short_name %in% detectors$mq_name) %>% 
+  rename(mq_name = "mq_short_name")
+detectors <- detectors %>% 
+  left_join(detectors_info, by = "mq_name")
+
+# 2.d. Get All detectors (not just selection)
+detectors_all <- send_query_clickhouse_in("select * from traffic_det_cross_sections;") %>% 
+  rename(mq_name = "mq_short_name") %>% 
+  st_as_sf(
+    coords = c("lon", "lat"),
+    crs = st_crs(4326)) %>% 
+  st_transform(25833)
+
+```
+
+
+```{r}
+traffic <- extract_raw_clickhouse("traffic_raw") %>% 
+  st_transform(25833)
+```
+
+
+### Selected detectors with info
+
+* _red_ circles are cell centroids of associated raster cells
+
+```{r}
+# 3. Map results
+mapview(detectors) +
+  mapview(cell_centroids, color = "red", cex = 4)
+```
+
+### All detectors with original traffic averages
+
+* traffic here represents the 2019 averages
+
+```{r}
+mapview(detectors_all) +
+  mapview(traffic, zcol = "kfz")
+```
+

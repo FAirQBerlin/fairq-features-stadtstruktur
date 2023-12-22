@@ -1,0 +1,168 @@
+---
+title: "Street length and traffic intensity data validation"
+output: 
+  html_document:
+    toc: true
+    number_sections: false
+    toc_float: true
+    toc_depth: 3
+    self_contained: true
+author: "Guido Schulz (guido.schulz@inwt-statistics.de)"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+---
+
+```{r setup, message=FALSE, warning=FALSE, cache=FALSE, echo=FALSE}
+devtools::load_all()
+library(dplyr)
+library(ggplot2)
+library(terra)
+library(sf)
+
+fig_width <- 12
+fig_height <- 16
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  fig.width = fig_width,
+  fig.height = fig_height)
+```
+
+```{r, get_data}
+strassenklassen <- c("0", "I", "II", "III", "IV", "V")
+
+# Raw traffic (no of vehicles) data as vector data
+traffic_sf <- extract_raw_clickhouse("traffic_raw") %>%
+  st_transform(25833)
+# Streets lines as vector data
+streets_sf <- extract_raw_clickhouse("streets") %>%
+  st_transform(25833)
+
+# Streets lengths as df
+sl_df <- send_query_clickhouse_out("traffic_intensity")
+# Traffic intensity as df
+ti_df <- send_query_clickhouse_out("validate_traffic_intensity")
+
+# Convert into terra objects
+streets_vect <- vect(streets_sf)
+sl <- df_to_rast(sl_df)
+ti <- df_to_rast(ti_df)
+```
+
+```{r, prepare_data}
+sl_df_long <- sl_df %>%
+  pivot_longer(
+    cols = starts_with("strassenklasse"),
+    names_to = "strassenklasse",
+    names_prefix = "strassenklasse_",
+    values_to = "length"
+  ) %>%
+  mutate(strassenklasse = factor(strassenklasse,
+                                 levels = strassenklassen))
+```
+
+## Maps
+
+### Original street lines
+
+```{r}
+ggplot() +
+  geom_sf(data = streets_sf, aes(color = strassenklasse1)) +
+  facet_wrap(~ strassenklasse1, ncol = 2) +
+  coord_sf(datum = sf::st_crs(25833)) +
+  theme(legend.position = "top")
+```
+
+### Calculated street lengths per cell
+
+```{r}
+plot(sl,
+     nc = 2,
+     maxcell = ncell(sl)) 
+```
+
+### Original traffic (number of vehicles)
+
+#### Kfz
+
+```{r}
+ggplot() +
+  geom_sf(data = traffic_sf, aes(color = kfz)) +
+  coord_sf(datum = sf::st_crs(25833)) +
+  theme(legend.position = "top")
+```
+
+#### Lkw
+
+```{r}
+ggplot() +
+  geom_sf(data = traffic_sf, aes(color = lkw)) +
+  coord_sf(datum = sf::st_crs(25833)) +
+  theme(legend.position = "top")
+```
+
+### Traffic intensity per cell 
+
+Interpretation of traffic intensity is:
+
+* (= 1) traffic equals that of an average cell which has streets in it
+* (< 1) less traffic than an average cell which has streets in it
+* (> 1) more traffic than an average cell which has streets in it
+
+
+```{r}
+plot(ti,
+     nc = 1,
+     maxcell = ncell(ti))
+```
+
+
+##  Statistical distribution
+
+### Street lengths per cell
+
+```{r}
+sl_df_long %>% 
+  group_by(strassenklasse) %>% 
+  summarise(as_tibble(rbind(summary(length))))
+```
+
+Here we can observe a very plausible lumping at 
+
+* 50 (because cell size is 50m) and at 
+* 100 (two streets passing through one cell either horizontally or vertically)
+
+However, most cells have a street length of 0 for all street types - because
+there are no streets in it. Plausible if we look at the maps above.
+
+```{r, warnings = FALSE}
+sl_df_long %>%
+  ggplot(aes(x = length, y = "", color = strassenklasse)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(data = sl_df_long %>% filter(length > 0),
+              alpha = 0.08,
+              size = 0.004) +
+  facet_wrap(~ strassenklasse,
+              ncol = 1) +
+  xlim(c(0, 130)) +
+  theme(legend.position = "none",
+        axis.title.y = element_blank())
+```
+
+### Traffic intensity
+
+Interpretation of traffic intensity is:
+
+* (= 1) traffic equals that of an average cell which has streets in it
+* (< 1) less traffic than an average cell which has streets in it
+* (> 1) more traffic than an average cell which has streets in it
+
+#### Kfz
+
+```{r}
+summary(ti_df$traffic_intensity_kfz)
+```
+#### Lkw
+
+```{r}
+summary(ti_df$traffic_intensity_lkw)
+```

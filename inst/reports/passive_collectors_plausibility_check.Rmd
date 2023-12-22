@@ -1,0 +1,134 @@
+---
+title: "Passivsammler - NO2 Modellvorhersage vs. Messwerte"
+output: 
+  html_document:
+    toc: false
+    self_contained: true
+    css: report_widescreen.css
+author: "Guido Schulz (guido.schulz@inwt-statistics.de)"
+date: '`r format(Sys.Date(), "%d.%m.%Y")`'
+---
+
+```{r setup, message=FALSE, warning=FALSE, cache=FALSE, echo=FALSE}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# Map locations of passive collectors on grid and show how model predictions
+# in their respective grid cells performed
+#
+# https://github.com/INWT/fairq-features-stadtstruktur/issues/62
+#
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+library(DT)
+library(tidyverse)
+library(readxl)
+library(mapview)
+library(terra)
+library(sf)
+library(RColorBrewer)
+library(viridis)
+
+devtools::document()
+devtools::load_all()
+
+fig_width <- 12
+fig_height <- 12
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = fig_width,
+  fig.height = fig_height)
+```
+
+## Modellvorhersage vs. Messwerte
+
+```{r load_data_from_xlsx}
+passive_collectors_stats <- read_excel(
+  path = "../../data/Vergleich_Modell_Messung_Passivsammler_2022.xlsx",
+  sheet = "Tabelle2") %>% 
+  mutate(id = factor(id),
+         `Abweichung %` = `Abweichung relativ` * 100) %>% 
+  select(-lon, -lat, -pollutant)
+
+colnames(passive_collectors_stats)[5] <- "Adresse"
+
+passive_collectors_stats <- passive_collectors_stats %>% 
+  select(id, Adresse, `Modell-Jahresmittel`, `Mess-Jahresmittel`:`Abweichung %`) %>% 
+  select(-`Abweichung relativ`) %>% 
+  mutate(across(where(is.numeric), round, digits = 1)) %>% 
+  rename(id_passive = "id")
+datatable(passive_collectors_stats)
+```
+
+```{r load_data_from_db}
+passive_collectors_raw <-
+  send_query_clickhouse_out("passive_collectors_plausibility") %>% 
+  mutate(id_passive = factor(id_passive)) %>% 
+  left_join(passive_collectors_stats, by = "id_passive")
+# passive_collectors_raw %>% head()
+
+passive_collectors <- passive_collectors_raw %>%
+  filter(!is.na(id_passive)) %>%
+  select(id_passive:kfz_per_24h) %>%
+  st_as_sf(coords = c("lon_passive", "lat_passive"),
+           crs = st_crs(4326)) %>%
+  st_transform(25833)
+# passive_collectors
+
+streets <- extract_raw_clickhouse("streets") %>%
+  select(strassenklasse1) %>%
+  rename(strassenklasse = "strassenklasse1") %>%
+  mutate(strassenklasse = factor(strassenklasse)) %>%
+  st_transform(25833)
+# streets
+```
+
+
+
+```{r transform_data}
+streets_near_passive_collectors <- passive_collectors %>%
+  st_buffer(dist = 100) %>%
+  st_intersection(streets) %>%
+  select(strassenklasse)
+# streets_near_passive_collectors
+# mapview(streets_near_passive_collectors)
+
+cells <- passive_collectors_raw %>%
+  select(id_stadt:id_passive, address:`Abweichung %`) %>%
+  mutate(
+    contains_passive_collectors = case_when(
+      is.na(id_passive) ~ "no passive collector",
+      TRUE ~ "contains passive collector"
+    ) %>%
+      factor()
+  ) %>%
+  st_as_sf(coords = c("lon_stadt", "lat_stadt"),
+           crs = st_crs(4326)) %>%
+  st_transform(25833) %>%
+  st_buffer(dist = 25, endCapStyle = "SQUARE")
+# cells
+# mapview(cells)
+
+cells_with_passive_collectors <- cells %>%
+  filter(contains_passive_collectors == "contains passive collector")
+```
+
+## Erklärende Karte
+
+```{r map, out.width="100%"}
+col_breaks <- c(-60, -40, -20, -5, 5, 20, 40, 60)
+n_col_breaks <- length(col_breaks)
+
+passive_collectors_map <- mapview(passive_collectors) +
+  mapview(cells, zcol = "kfz_per_24h", hide = TRUE) +
+  mapview(
+    cells_with_passive_collectors,
+    zcol = "Abweichung %",
+    col.regions = rev(brewer.pal(n = n_col_breaks + 1, name = "RdBu")),
+    at = col_breaks
+  ) +
+  mapview(streets_near_passive_collectors, zcol = "strassenklasse")
+passive_collectors_map
+```

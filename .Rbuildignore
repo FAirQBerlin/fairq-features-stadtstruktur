@@ -1,0 +1,10 @@
+^.+\.Rproj$
+^\.Rproj\.user$
+^reports$
+^\.dockerignore$
+^Dockerfile$
+^Jenkinsfile$
+^\.Renviron
+^lib
+^.vscode
+^scripts
