@@ -1,6 +1,6 @@
 Package: fairqFeaturesStadtstruktur
 Title: Feature Engineering for FairQ Modelling using city (geo)data as input
-Version: 23.12.0
+Version: 24.02.0
 Authors@R: person("Guido", "Schulz", , "guido.schulz@inwt-statistics.de", role = c("aut", "cre"))
 Description: Import city related raw data from fairq_raw database, 
              engineer features and write it to fairq_features database.

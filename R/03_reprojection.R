@@ -43,8 +43,8 @@ reproject <- function(df) {
 prepare_mapping <- function(df) {
   df %>%
     mutate(
-      x = sf::st_coordinates(df)[, "X"],
-      y = sf::st_coordinates(df)[, "Y"],
+      x = floor(sf::st_coordinates(df)[, "X"]),
+      y = floor(sf::st_coordinates(df)[, "Y"]),
       lat_int = .data$lat * 100000,
       lon_int = .data$lon * 100000
     ) %>%
